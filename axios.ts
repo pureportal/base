@@ -32,16 +32,23 @@ async function handleUnauthorized (response: any, originalRequest: any) {
                         return status >= 200 && status < 500;
                     }
                 });
-                const response = await axiosInstance.post(`${import.meta.env.VITE_ZITADEL_DOMAIN}/oauth/v2/token`, {
-                    grant_type: 'refresh_token',
-                    client_id: import.meta.env.VITE_ZITADEL_CLIENT_ID,
-                    refresh_token: refreshToken,
-                }, {
-                    validateStatus: (status) => {
-                        return status >= 200 && status < 500;
-                    }
-                });
+                const response = await axiosInstance.post(`${import.meta.env.VITE_ZITADEL_DOMAIN}/oauth/v2/token`,
+                    {},
+                    {
+                        params: {
+                            grant_type: 'refresh_token',
+                            client_id: import.meta.env.VITE_ZITADEL_CLIENT_ID,
+                            refresh_token: refreshToken,
+                        },
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        validateStatus: (status) => {
+                            return status >= 200 && status < 500;
+                        }
+                    });
                 console.log(`Status: ${response.status}`);
+                console.log(`Data: ${JSON.stringify(response.data)}`);
                 if (response.status === 200) {
                     console.log(`Access token refreshed`);
                     useGlobalStore.setState({ accessToken: response.data.access_token });
