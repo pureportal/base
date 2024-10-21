@@ -4,8 +4,27 @@ import axios from 'axios';
 import useGlobalStore from '@/zustand/global';
 import { BareFetcher, SWRConfiguration } from 'swr';
 
-const baseURL = import.meta.env.VITE_API_BASE_URL ?? "/api";
 let ongoingRefreshTokenRequest = false;
+
+function getApiUrl () {
+    if(!import.meta.env.PROD && useGlobalStore.getState().debugMode) {
+        return import.meta.env.VITE_API_BASE_URL_DEBUG;
+    }
+    else{
+        return import.meta.env.VITE_API_BASE_URL;
+    }
+}
+
+function getAccountManagerUrl () {
+    if(!import.meta.env.PROD && useGlobalStore.getState().debugMode) {
+        console.log(`Using debug account manager domain: ${import.meta.env.VITE_ACCOUNT_MANAGER_DOMAIN_DEBUG}`);
+        return import.meta.env.VITE_ACCOUNT_MANAGER_DOMAIN_DEBUG;
+    }
+    else{
+        console.log(`Using account manager domain: ${import.meta.env.VITE_ACCOUNT_MANAGER_DOMAIN}`);
+        return import.meta.env.VITE_ACCOUNT_MANAGER_DOMAIN;
+    }
+}
 
 async function handleUnauthorized (response: any, originalRequest: any) {
 
@@ -82,7 +101,7 @@ async function handleUnauthorized (response: any, originalRequest: any) {
 }
 
 const instance = axios.create({
-    baseURL: baseURL,
+    baseURL: getApiUrl(),
     headers: {
         'Content-Type': 'application/json',
     },
@@ -179,4 +198,4 @@ const Fetcher = async ({ url, filter, orderBy, limit, offset, additionalParams }
 };
 
 export default instance;
-export { Fetcher };
+export { Fetcher, getApiUrl, getAccountManagerUrl };
