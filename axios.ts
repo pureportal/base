@@ -3,25 +3,26 @@
 import axios from 'axios';
 import useGlobalStore from '@/zustand/global';
 import { BareFetcher, SWRConfiguration } from 'swr';
+import logger from '@/components/shared/Logger';
 
 let ongoingRefreshTokenRequest = false;
 
 function getApiUrl () {
-    if(!import.meta.env.PROD && useGlobalStore.getState().debugMode) {
+    if (!import.meta.env.PROD && useGlobalStore.getState().debugMode) {
         return import.meta.env.VITE_API_BASE_URL_DEBUG;
     }
-    else{
+    else {
         return import.meta.env.VITE_API_BASE_URL;
     }
 }
 
 function getAccountManagerUrl () {
-    if(!import.meta.env.PROD && useGlobalStore.getState().debugMode) {
-        console.log(`Using debug account manager domain: ${import.meta.env.VITE_ACCOUNT_MANAGER_DOMAIN_DEBUG}`);
+    if (!import.meta.env.PROD && useGlobalStore.getState().debugMode) {
+        logger.info(`Using debug account manager domain: ${import.meta.env.VITE_ACCOUNT_MANAGER_DOMAIN_DEBUG}`);
         return import.meta.env.VITE_ACCOUNT_MANAGER_DOMAIN_DEBUG;
     }
-    else{
-        console.log(`Using account manager domain: ${import.meta.env.VITE_ACCOUNT_MANAGER_DOMAIN}`);
+    else {
+        logger.info(`Using account manager domain: ${import.meta.env.VITE_ACCOUNT_MANAGER_DOMAIN}`);
         return import.meta.env.VITE_ACCOUNT_MANAGER_DOMAIN;
     }
 }
@@ -29,23 +30,23 @@ function getAccountManagerUrl () {
 async function handleUnauthorized (response: any, originalRequest: any) {
 
     if (response.status === 401 && !originalRequest._retry) {
-        console.log('Unauthorized...');
+        logger.error('Unauthorized...');
 
         originalRequest._retry = true;
         const refreshToken = useGlobalStore.getState().refreshToken;
         if (refreshToken) {
             if (ongoingRefreshTokenRequest) {
-                console.log(`Another refresh token request is ongoing, waiting for it to finish...`);
+                logger.info(`Another refresh token request is ongoing, waiting for it to finish...`);
                 while (ongoingRefreshTokenRequest) {
                     await new Promise(resolve => setTimeout(resolve, 1000));
                 }
-                console.log(`Another refresh token request has finished, retrying original request...`);
+                logger.info(`Another refresh token request has finished, retrying original request...`);
                 return axios(originalRequest.responseURL);
             }
             try {
                 ongoingRefreshTokenRequest = true;
 
-                console.log(`refresh_token found, try to refresh token`);
+                logger.info(`refresh_token found, try to refresh token`);
                 const axiosInstance = axios.create({
                     validateStatus: (status) => {
                         return status >= 200 && status < 500;
@@ -66,33 +67,31 @@ async function handleUnauthorized (response: any, originalRequest: any) {
                             return status >= 200 && status < 500;
                         }
                     });
-                console.log(`Status: ${response.status}`);
-                console.log(`Data: ${JSON.stringify(response.data)}`);
                 if (response.status === 200) {
-                    console.log(`Access token refreshed`);
+                    logger.info(`Access token refreshed`);
                     useGlobalStore.setState({ accessToken: response.data.access_token });
                     useGlobalStore.setState({ tokenValidated: true });
                     if (response.data.refresh_token) {
-                        console.log(`Refresh token refreshed`);
+                        logger.info(`Refresh token refreshed`);
                         useGlobalStore.setState({ refreshToken: response.data.refresh_token });
                     }
                     return axios(originalRequest.responseURL);
                 }
                 else {
-                    console.log(`Failed to refresh token`);
+                    logger.error(`Failed to refresh token`);
                     useGlobalStore.setState({ accessToken: null });
                     useGlobalStore.setState({ refreshToken: null });
                     useGlobalStore.setState({ tokenValidated: false });
                 }
             } catch (e) {
-                console.warn(e);
+                logger.error(`Failed to refresh token: ${e}`);
             }
             finally {
                 ongoingRefreshTokenRequest = false;
             }
         }
         else {
-            console.log(`No refresh token found - Logging out`);
+            logger.error(`No refresh token found, clearing access token...`);
             useGlobalStore.setState({ accessToken: null });
             useGlobalStore.setState({ refreshToken: null });
             useGlobalStore.setState({ tokenValidated: false });
@@ -100,6 +99,7 @@ async function handleUnauthorized (response: any, originalRequest: any) {
     }
 }
 
+logger.info(`Create axios instance using domain: ${getApiUrl()}`);
 const instance = axios.create({
     baseURL: getApiUrl(),
     headers: {
@@ -110,7 +110,7 @@ const instance = axios.create({
     }
 });
 
-console.log('Set request interceptor for axios instance');
+logger.info('Set request interceptor for axios instance');
 instance.interceptors.request.use(
     (config) => {
         const accessToken = useGlobalStore.getState().accessToken;
@@ -121,8 +121,48 @@ instance.interceptors.request.use(
     }
 );
 
-console.log('Set response interceptor for axios instance');
+logger.info('Set response interceptor for axios instance');
 instance.interceptors.response.use(
+    async (response: any) => {
+        const originalRequest = response.request;
+        if (response.status === 401 && !originalRequest._retry) {
+            await handleUnauthorized(response, originalRequest);
+        }
+        return response;
+    },
+    async (error: { config: any; response: { status: number; }; }) => {
+        const originalRequest = error.config;
+        if (error.response && error.response.status === 401 && !originalRequest._retry) {
+            await handleUnauthorized(error.response, originalRequest);
+        }
+        return Promise.reject(error);
+    },
+);
+
+logger.info(`Create axios instance for account manager using domain: ${getAccountManagerUrl()}`);
+const instanceAccountManager = axios.create({
+    baseURL: getAccountManagerUrl(),
+    headers: {
+        'Content-Type': 'application/json',
+    },
+    validateStatus: (status) => {
+        return status >= 200 && status < 500;
+    }
+});
+
+logger.info('Set request interceptor for account manager axios instance');
+instanceAccountManager.interceptors.request.use(
+    (config) => {
+        const accessToken = useGlobalStore.getState().accessToken;
+        if (accessToken) {
+            config.headers.Authorization = `Bearer ${accessToken}`;
+        }
+        return config;
+    }
+);
+
+logger.info('Set response interceptor for account manager axios instance');
+instanceAccountManager.interceptors.response.use(
     async (response: any) => {
         const originalRequest = response.request;
         if (response.status === 401 && !originalRequest._retry) {
@@ -198,4 +238,4 @@ const Fetcher = async ({ url, filter, orderBy, limit, offset, additionalParams }
 };
 
 export default instance;
-export { Fetcher, getApiUrl, getAccountManagerUrl };
+export { Fetcher, getApiUrl, getAccountManagerUrl, instanceAccountManager };
